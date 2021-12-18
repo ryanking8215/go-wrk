@@ -1,9 +1,8 @@
-module github.com/tsliwowicz/go-wrk
+module github.com/ryanking8215/go-wrk
 
 go 1.16
 
-require golang.org/x/net v0.0.0-20210614182718-04defd469f4e
-
-replace github.com/tsliwowicz/go-wrk/loader => ./loader
-
-replace github.com/tsliwowicz/go-wrk/util => ./util
+require (
+	github.com/dop251/goja v0.0.0-20211211112501-fb27c91c26ed
+	golang.org/x/net v0.0.0-20210614182718-04defd469f4e
+)

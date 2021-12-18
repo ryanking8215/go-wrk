@@ -8,10 +8,12 @@ It turns out that it is just as good in terms of throughput! And with a lot less
 
 The majority of go-wrk is the product of one afternoon, and its quality is comparable to wrk.
 
+The javascript support also took me about one afternoon. -:)
+
 Building
 --------
 
-    go get github.com/tsliwowicz/go-wrk
+    go get github.com/ryanking8215/go-wrk
 
 This will download and compile go-wrk. The binary will be placed under your $GOPATH/bin directory  
    
@@ -37,6 +39,7 @@ Command line parameters (./go-wrk -help)
         -no-vr   Skip verifying SSL certificate of the server (Default false)
         -redir   Allow Redirects (Default false)
         -v       Print version details (Default false)
+        -s       Load javascript script file. 
 
 Basic Usage
 -----------
@@ -58,6 +61,18 @@ Output:
          Number of Errors:	0
 
 
+Javascript Supports
+--------------------
+Javascript is powered by [Goja](https://github.com/dop251/goja).
+
+```shell
+  ./go-wrk -c 10 -d 5 -s <my-script-file> http://192.168.1.118:8080/json
+  ./go-wrk -s <my-script-file> # all defines in script file
+```
+
+Feel free to use javascript to orchestrate your benchmarking tasks.
+Please refer to the example files in 'scripts' directory.
+
 Benchmarking Tips
 -----------------
 
@@ -69,6 +84,7 @@ Benchmarking Tips
 Acknowledgements
 ----------------
 
-  golang is awesome. I did not need anything but this to create go-wrk.  
-  I fully credit the wrk project (https://github.com/wg/wrk) for the inspiration and even parts of this text.  
-  I also used similar command line arguments format and output format.
+  [The original author](https://github.com/tsliwowicz) fully credit the wrk project (https://github.com/wg/wrk) for the inspiration and even parts of this text.  
+  [The original author](https://github.com/tsliwowicz) also used similar command line arguments format and output format.
+
+  I added javascript support in this project like lua in wrk.

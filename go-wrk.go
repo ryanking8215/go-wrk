@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -10,54 +11,42 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tsliwowicz/go-wrk/loader"
-	"github.com/tsliwowicz/go-wrk/util"
+	"github.com/ryanking8215/go-wrk/loader"
+	"github.com/ryanking8215/go-wrk/util"
 )
 
-const APP_VERSION = "0.9"
+const APP_VERSION = "0.10"
 
 //default that can be overridden from the command line
 var versionFlag bool = false
 var helpFlag bool = false
-var duration int = 10 //seconds
-var goroutines int = 2
-var testUrl string
-var method string = "GET"
-var host string
 var headerFlags util.HeaderList
-var header map[string]string
 var statsAggregator chan *loader.RequesterStats
-var timeoutms int
-var allowRedirectsFlag bool = false
-var disableCompression bool
-var disableKeepAlive bool
-var skipVerify bool
 var playbackFile string
-var reqBody string
-var clientCert string
-var clientKey string
-var caCert string
-var http2 bool
+var scriptFile string
+var config = loader.NewConfig()
+var script *loader.ScriptContext
 
 func init() {
 	flag.BoolVar(&versionFlag, "v", false, "Print version details")
-	flag.BoolVar(&allowRedirectsFlag, "redir", false, "Allow Redirects")
+	flag.BoolVar(&config.AllowRedirects, "redir", false, "Allow Redirects")
 	flag.BoolVar(&helpFlag, "help", false, "Print help")
-	flag.BoolVar(&disableCompression, "no-c", false, "Disable Compression - Prevents sending the \"Accept-Encoding: gzip\" header")
-	flag.BoolVar(&disableKeepAlive, "no-ka", false, "Disable KeepAlive - prevents re-use of TCP connections between different HTTP requests")
-	flag.BoolVar(&skipVerify, "no-vr", false, "Skip verifying SSL certificate of the server")
-	flag.IntVar(&goroutines, "c", 10, "Number of goroutines to use (concurrent connections)")
-	flag.IntVar(&duration, "d", 10, "Duration of test in seconds")
-	flag.IntVar(&timeoutms, "T", 1000, "Socket/request timeout in ms")
-	flag.StringVar(&method, "M", "GET", "HTTP method")
-	flag.StringVar(&host, "host", "", "Host Header")
+	flag.BoolVar(&config.DisableCompression, "no-c", false, "Disable Compression - Prevents sending the \"Accept-Encoding: gzip\" header")
+	flag.BoolVar(&config.DisableKeepAlive, "no-ka", false, "Disable KeepAlive - prevents re-use of TCP connections between different HTTP requests")
+	flag.BoolVar(&config.SkipVerify, "no-vr", false, "Skip verifying SSL certificate of the server")
+	flag.IntVar(&config.Goroutines, "c", 10, "Number of goroutines to use (concurrent connections)")
+	flag.IntVar(&config.Duration, "d", 10, "Duration of test in seconds")
+	flag.IntVar(&config.Timeoutms, "T", 1000, "Socket/request timeout in ms")
+	flag.StringVar(&config.Method, "M", "GET", "HTTP method")
+	flag.StringVar(&config.Host, "host", "", "Host Header")
 	flag.Var(&headerFlags, "H", "Header to add to each request (you can define multiple -H flags)")
 	flag.StringVar(&playbackFile, "f", "<empty>", "Playback file name")
-	flag.StringVar(&reqBody, "body", "", "request body string or @filename")
-	flag.StringVar(&clientCert, "cert", "", "CA certificate file to verify peer against (SSL/TLS)")
-	flag.StringVar(&clientKey, "key", "", "Private key file name (SSL/TLS")
-	flag.StringVar(&caCert, "ca", "", "CA file to verify peer against (SSL/TLS)")
-	flag.BoolVar(&http2, "http", true, "Use HTTP/2")
+	flag.StringVar(&config.ReqBody, "body", "", "request body string or @filename")
+	flag.StringVar(&config.ClientCert, "cert", "", "CA certificate file to verify peer against (SSL/TLS)")
+	flag.StringVar(&config.ClientKey, "key", "", "Private key file name (SSL/TLS")
+	flag.StringVar(&config.CaCert, "ca", "", "CA file to verify peer against (SSL/TLS)")
+	flag.BoolVar(&config.Http2, "http", true, "Use HTTP/2")
+	flag.StringVar(&scriptFile, "s", "", "Load javascript script file")
 }
 
 //printDefaults a nicer format for the defaults
@@ -69,22 +58,30 @@ func printDefaults() {
 	})
 }
 
+func cfg() *loader.Config {
+	if script != nil {
+		return &script.Config
+	}
+	return &config
+}
+
 func main() {
-	//raising the limits. Some performance gains were achieved with the + goroutines (not a lot).
-	runtime.GOMAXPROCS(runtime.NumCPU() + goroutines)
-
-	statsAggregator = make(chan *loader.RequesterStats, goroutines)
-	sigChan := make(chan os.Signal, 1)
-
-	signal.Notify(sigChan, os.Interrupt)
-
 	flag.Parse() // Scan the arguments list
-	header = make(map[string]string)
-	if headerFlags != nil {
-		for _, hdr := range headerFlags {
-			hp := strings.SplitN(hdr, ":", 2)
-			header[hp[0]] = hp[1]
+	if scriptFile != "" {
+		var err error
+		script, err = loader.LoadScript(config, scriptFile)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
 		}
+	}
+
+	//raising the limits. Some performance gains were achieved with the + goroutines (not a lot).
+	runtime.GOMAXPROCS(runtime.NumCPU() + cfg().Goroutines)
+
+	for _, hdr := range headerFlags {
+		hp := strings.SplitN(hdr, ":", 2)
+		cfg().Header[hp[0]] = hp[1]
 	}
 
 	if playbackFile != "<empty>" {
@@ -94,50 +91,58 @@ func main() {
 			os.Exit(1)
 		}
 		defer file.Close()
-		url, err := ioutil.ReadAll(file)
+		url, err := io.ReadAll(file)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		testUrl = string(url)
+		cfg().TestUrl = string(url)
 	} else {
-		testUrl = flag.Arg(0)
+		if len(cfg().TestUrl) == 0 { // if not defined in script, take it from commad.
+			cfg().TestUrl = flag.Arg(0)
+		}
 	}
 
 	if versionFlag {
 		fmt.Println("Version:", APP_VERSION)
 		return
-	} else if helpFlag || len(testUrl) == 0 {
+	} else if helpFlag || len(cfg().TestUrl) == 0 {
 		printDefaults()
 		return
 	}
 
-	fmt.Printf("Running %vs test @ %v\n  %v goroutine(s) running concurrently\n", duration, testUrl, goroutines)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
 
-	if len(reqBody) > 0 && reqBody[0] == '@' {
-		bodyFilename := reqBody[1:]
+	fmt.Printf("Running %vs test @ %v\n  %v goroutine(s) running concurrently\n", cfg().Duration, cfg().TestUrl, cfg().Goroutines)
+
+	if len(cfg().ReqBody) > 0 && cfg().ReqBody[0] == '@' {
+		bodyFilename := cfg().ReqBody[1:]
 		data, err := ioutil.ReadFile(bodyFilename)
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not read file %q: %v", bodyFilename, err))
 			os.Exit(1)
 		}
-		reqBody = string(data)
+		cfg().ReqBody = string(data)
 	}
 
-	loadGen := loader.NewLoadCfg(duration, goroutines, testUrl, reqBody, method, host, header, statsAggregator, timeoutms,
-		allowRedirectsFlag, disableCompression, disableKeepAlive, skipVerify, clientCert, clientKey, caCert, http2)
-
-	for i := 0; i < goroutines; i++ {
-		go loadGen.RunSingleLoadSession()
+	statsAggregator = make(chan *loader.RequesterStats, cfg().Goroutines)
+	runner := loader.NewRunner(config, statsAggregator)
+	for i := 0; i < cfg().Goroutines; i++ {
+		var s *loader.ScriptContext
+		if scriptFile != "" {
+			s, _ = loader.LoadScript(*cfg(), scriptFile)
+		}
+		go runner.RunSingleSession(s)
 	}
 
 	responders := 0
 	aggStats := loader.RequesterStats{MinRequestTime: time.Minute}
 
-	for responders < goroutines {
+	for responders < cfg().Goroutines {
 		select {
 		case <-sigChan:
-			loadGen.Stop()
+			runner.Stop()
 			fmt.Printf("stopping...\n")
 		case stats := <-statsAggregator:
 			aggStats.NumErrs += stats.NumErrs
@@ -151,7 +156,7 @@ func main() {
 	}
 
 	if aggStats.NumRequests == 0 {
-		fmt.Println("Error: No statistics collected / no requests found\n")
+		fmt.Printf("Error: No statistics collected / no requests found\n")
 		return
 	}
 
@@ -160,8 +165,8 @@ func main() {
 	reqRate := float64(aggStats.NumRequests) / avgThreadDur.Seconds()
 	avgReqTime := aggStats.TotDuration / time.Duration(aggStats.NumRequests)
 	bytesRate := float64(aggStats.TotRespSize) / avgThreadDur.Seconds()
-	fmt.Printf("%v requests in %v, %v read\n", aggStats.NumRequests, avgThreadDur, util.ByteSize{float64(aggStats.TotRespSize)})
-	fmt.Printf("Requests/sec:\t\t%.2f\nTransfer/sec:\t\t%v\nAvg Req Time:\t\t%v\n", reqRate, util.ByteSize{bytesRate}, avgReqTime)
+	fmt.Printf("%v requests in %v, %v read\n", aggStats.NumRequests, avgThreadDur, util.ByteSize{Size: float64(aggStats.TotRespSize)})
+	fmt.Printf("Requests/sec:\t\t%.2f\nTransfer/sec:\t\t%v\nAvg Req Time:\t\t%v\n", reqRate, util.ByteSize{Size: bytesRate}, avgReqTime)
 	fmt.Printf("Fastest Request:\t%v\n", aggStats.MinRequestTime)
 	fmt.Printf("Slowest Request:\t%v\n", aggStats.MaxRequestTime)
 	fmt.Printf("Number of Errors:\t%v\n", aggStats.NumErrs)

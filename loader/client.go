@@ -3,14 +3,13 @@ package loader
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io/ioutil"
 	"net/http"
-
-	"fmt"
-
-	"golang.org/x/net/http2"
 	"time"
-	"github.com/tsliwowicz/go-wrk/util"
+
+	"github.com/ryanking8215/go-wrk/util"
+	"golang.org/x/net/http2"
 )
 
 func client(disableCompression, disableKeepAlive, skipVerify bool, timeoutms int, allowRedirects bool, clientCert, clientKey, caCert string, usehttp2 bool) (*http.Client, error) {
@@ -68,7 +67,9 @@ func client(disableCompression, disableKeepAlive, skipVerify bool, timeoutms int
 	}
 
 	if usehttp2 {
-		http2.ConfigureTransport(t)
+		if err := http2.ConfigureTransport(t); err != nil {
+			return nil, fmt.Errorf("Unnable to configure http2 %v", err)
+		}
 	}
 	client.Transport = t
 	return client, nil

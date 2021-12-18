@@ -12,32 +12,73 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tsliwowicz/go-wrk/util"
+	"github.com/ryanking8215/go-wrk/util"
 )
 
 const (
 	USER_AGENT = "go-wrk"
 )
 
-type LoadCfg struct {
-	duration           int //seconds
-	goroutines         int
-	testUrl            string
-	reqBody            string
-	method             string
-	host               string
-	header             map[string]string
-	statsAggregator    chan *RequesterStats
-	timeoutms          int
-	allowRedirects     bool
-	disableCompression bool
-	disableKeepAlive   bool
-	skipVerify	 	   bool
-	interrupted        int32
-	clientCert         string
-	clientKey          string
-	caCert             string
-	http2              bool
+type Runner struct {
+	cfg             Config
+	statsAggregator chan *RequesterStats
+	interrupted     int32
+}
+
+func NewRunner(cfg Config, statsAggregater chan *RequesterStats) *Runner {
+	return &Runner{
+		cfg:             cfg,
+		statsAggregator: statsAggregater,
+		interrupted:     0,
+	}
+}
+
+//Requester a go function for repeatedly making requests and aggregating statistics as long as required
+//When it is done, it sends the results using the statsAggregator channel
+func (runner *Runner) RunSingleSession(script *ScriptContext) {
+	stats := &RequesterStats{MinRequestTime: time.Minute}
+	start := time.Now()
+	cfg := &runner.cfg
+	if script != nil {
+		cfg = &script.Config
+	}
+
+	httpClient, err := client(cfg.DisableCompression, cfg.DisableKeepAlive, cfg.SkipVerify,
+		cfg.Timeoutms, cfg.AllowRedirects, cfg.ClientCert, cfg.ClientKey, cfg.CaCert, cfg.Http2)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for time.Since(start).Seconds() <= float64(cfg.Duration) && atomic.LoadInt32(&runner.interrupted) == 0 {
+		if script != nil && script.request != nil {
+			script.request()
+		}
+
+		respSize, reqDur := DoRequest(httpClient, cfg.Header, cfg.Method, cfg.Host, cfg.TestUrl, cfg.ReqBody, script)
+		if respSize > 0 {
+			stats.TotRespSize += int64(respSize)
+			stats.TotDuration += reqDur
+			stats.MaxRequestTime = util.MaxDuration(reqDur, stats.MaxRequestTime)
+			stats.MinRequestTime = util.MinDuration(reqDur, stats.MinRequestTime)
+			stats.NumRequests++
+		} else {
+			stats.NumErrs++
+		}
+
+		if script != nil && script.stop != nil && script.stop() {
+			runner.Stop()
+		}
+
+		if script != nil && script.delay != nil {
+			time.Sleep(time.Duration(script.delay()) * time.Millisecond)
+		}
+	}
+
+	runner.statsAggregator <- stats
+}
+
+func (runner *Runner) Stop() {
+	atomic.StoreInt32(&runner.interrupted, 1)
 }
 
 // RequesterStats used for colelcting aggregate statistics
@@ -50,35 +91,13 @@ type RequesterStats struct {
 	NumErrs        int
 }
 
-func NewLoadCfg(duration int, //seconds
-	goroutines int,
-	testUrl string,
-	reqBody string,
-	method string,
-	host string,
-	header map[string]string,
-	statsAggregator chan *RequesterStats,
-	timeoutms int,
-	allowRedirects bool,
-	disableCompression bool,
-	disableKeepAlive bool,
-	skipVerify bool,
-	clientCert string,
-	clientKey string,
-	caCert string,
-	http2 bool) (rt *LoadCfg) {
-	rt = &LoadCfg{duration, goroutines, testUrl, reqBody, method, host, header, statsAggregator, timeoutms,
-		allowRedirects, disableCompression, disableKeepAlive, skipVerify, 0, clientCert, clientKey, caCert, http2}
-	return
-}
-
 func escapeUrlStr(in string) string {
 	qm := strings.Index(in, "?")
 	if qm != -1 {
 		qry := in[qm+1:]
 		qrys := strings.Split(qry, "&")
 		var query string = ""
-		var qEscaped string = ""
+		var qEscaped string
 		var first bool = true
 		for _, q := range qrys {
 			qSplit := strings.Split(q, "=")
@@ -103,7 +122,7 @@ func escapeUrlStr(in string) string {
 
 //DoRequest single request implementation. Returns the size of the response and its duration
 //On error - returns -1 on both
-func DoRequest(httpClient *http.Client, header map[string]string, method, host, loadUrl, reqBody string) (respSize int, duration time.Duration) {
+func DoRequest(httpClient *http.Client, header map[string]string, method, host, loadUrl, reqBody string, script *ScriptContext) (respSize int, duration time.Duration) {
 	respSize = -1
 	duration = -1
 
@@ -164,36 +183,9 @@ func DoRequest(httpClient *http.Client, header map[string]string, method, host, 
 		fmt.Println("received status code", resp.StatusCode, "from", resp.Header, "content", string(body), req)
 	}
 
+	if script != nil && script.response != nil {
+		script.response(resp.StatusCode, resp.Header, string(body))
+	}
+
 	return
-}
-
-//Requester a go function for repeatedly making requests and aggregating statistics as long as required
-//When it is done, it sends the results using the statsAggregator channel
-func (cfg *LoadCfg) RunSingleLoadSession() {
-	stats := &RequesterStats{MinRequestTime: time.Minute}
-	start := time.Now()
-
-	httpClient, err := client(cfg.disableCompression, cfg.disableKeepAlive, cfg.skipVerify, 
-		cfg.timeoutms, cfg.allowRedirects, cfg.clientCert, cfg.clientKey, cfg.caCert, cfg.http2)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for time.Since(start).Seconds() <= float64(cfg.duration) && atomic.LoadInt32(&cfg.interrupted) == 0 {
-		respSize, reqDur := DoRequest(httpClient, cfg.header, cfg.method, cfg.host, cfg.testUrl, cfg.reqBody)
-		if respSize > 0 {
-			stats.TotRespSize += int64(respSize)
-			stats.TotDuration += reqDur
-			stats.MaxRequestTime = util.MaxDuration(reqDur, stats.MaxRequestTime)
-			stats.MinRequestTime = util.MinDuration(reqDur, stats.MinRequestTime)
-			stats.NumRequests++
-		} else {
-			stats.NumErrs++
-		}
-	}
-	cfg.statsAggregator <- stats
-}
-
-func (cfg *LoadCfg) Stop() {
-	atomic.StoreInt32(&cfg.interrupted, 1)
 }
