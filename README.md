@@ -1,6 +1,8 @@
 go-wrk - an HTTP benchmarking tool
 ==================================
 
+Now you can write JavaScript file to setup your complicated benchmarking tasks when using go-wrk!
+
 go-wrk is a modern HTTP benchmarking tool capable of generating significant load when run on a single multi-core CPU. It builds on go language go routines and scheduler for behind the scenes async IO and concurrency.
 
 It was created mostly to examine go language (http://golang.org) performance and verbosity compared to C (the language wrk was written in. See - <https://github.com/wg/wrk>).  
@@ -8,7 +10,8 @@ It turns out that it is just as good in terms of throughput! And with a lot less
 
 The majority of go-wrk is the product of one afternoon, and its quality is comparable to wrk.
 
-The javascript support also took me about one afternoon. -:)
+By the way, the JavaScript support also took me about one afternoon. -:)
+
 
 Building
 --------
@@ -70,7 +73,7 @@ Javascript is powered by [Goja](https://github.com/dop251/goja).
   ./go-wrk -s <my-script-file> # all defines in script file
 ```
 
-Feel free to use javascript to orchestrate your benchmarking tasks.
+Feel free to use javascript to setup your benchmarking tasks.
 Please refer to the example files in 'scripts' directory.
 
 Benchmarking Tips
@@ -87,4 +90,4 @@ Acknowledgements
   [The original author](https://github.com/tsliwowicz) fully credit the wrk project (https://github.com/wg/wrk) for the inspiration and even parts of this text.  
   [The original author](https://github.com/tsliwowicz) also used similar command line arguments format and output format.
 
-  I added javascript support in this project like lua in wrk.
+  I added JavaScript support in go-wrk like lua in wrk.
