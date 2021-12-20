@@ -1,4 +1,4 @@
-"use strcit";
+"use strict";
 
 function request() {
 	wrk.method = "GET"; // http method
