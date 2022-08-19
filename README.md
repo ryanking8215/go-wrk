@@ -1,5 +1,5 @@
-go-wrk - an HTTP benchmarking tool
-==================================
+go-wrk - an HTTP benchmarking tool with JavaScript support.
+============================================================
 
 Now you can write JavaScript file to setup your complicated benchmarking tasks when using go-wrk!
 
