@@ -21,6 +21,7 @@ type Config struct {
 	CaCert             string `json:"ca_cert"`
 	Http2              bool   `json:"http2"`
 	RequestConfig
+	Id int64 `json:"id"`
 }
 
 func NewConfig() Config {

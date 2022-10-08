@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync/atomic"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/console"
@@ -39,6 +40,7 @@ func LoadScript(cfg Config, fn string) (*ScriptContext, error) {
 	}
 
 	s := &ScriptContext{Config: cfg.Clone()}
+	s.Config.Id = fetchId()
 
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
@@ -48,6 +50,7 @@ func LoadScript(cfg Config, fn string) (*ScriptContext, error) {
 	if err := vm.Set("wrk", &s.Config); err != nil {
 		return nil, err
 	}
+
 	if _, err := vm.RunString(content); err != nil {
 		return nil, err
 	}
@@ -74,6 +77,12 @@ func LoadScript(cfg Config, fn string) (*ScriptContext, error) {
 	}
 
 	return s, nil
+}
+
+var Id int64
+
+func fetchId() int64 {
+	return atomic.AddInt64(&Id, 1)
 }
 
 // func (s *ScriptContext) Clone() *ScriptContext {
